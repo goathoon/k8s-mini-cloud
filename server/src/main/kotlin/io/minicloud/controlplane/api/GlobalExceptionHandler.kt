@@ -1,5 +1,6 @@
 package io.minicloud.controlplane.api
 
+import io.minicloud.controlplane.orchestration.KubectlUnavailableException
 import io.minicloud.controlplane.service.ResourceAlreadyExistsException
 import io.minicloud.controlplane.service.ResourceNotFoundException
 import org.springframework.http.HttpStatus
@@ -17,6 +18,15 @@ data class ErrorResponse(
 
 @RestControllerAdvice
 class GlobalExceptionHandler {
+    @ExceptionHandler(KubectlUnavailableException::class)
+    @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
+    fun handleKubectlUnavailable(ex: KubectlUnavailableException): ErrorResponse {
+        return ErrorResponse(
+            code = "KUBECTL_UNAVAILABLE",
+            message = ex.message ?: "kubectl is unavailable",
+        )
+    }
+
     @ExceptionHandler(ResourceAlreadyExistsException::class)
     @ResponseStatus(HttpStatus.CONFLICT)
     fun handleAlreadyExists(ex: ResourceAlreadyExistsException): ErrorResponse {
@@ -38,4 +48,3 @@ class GlobalExceptionHandler {
         return ErrorResponse(code = "VALIDATION_ERROR", message = "Invalid request", details = details)
     }
 }
-

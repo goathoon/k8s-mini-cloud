@@ -24,3 +24,10 @@ management:
 server:
   port: 8080
 
+minicloud:
+  kubernetes:
+    kubectl-bin: ${KUBECTL_BIN:kubectl}
+    wait-timeout-seconds: ${K8S_WAIT_TIMEOUT_SECONDS:120}
+    postgres:
+      image: ${POSTGRES_IMAGE:postgres:16-alpine}
+      port: ${POSTGRES_PORT:5432}

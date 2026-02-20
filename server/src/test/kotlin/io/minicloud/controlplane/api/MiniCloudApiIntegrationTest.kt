@@ -7,6 +7,7 @@ import io.minicloud.controlplane.orchestration.AppProvisionResult
 import io.minicloud.controlplane.orchestration.AppProvisionSpec
 import io.minicloud.controlplane.orchestration.DatabaseProvisionResult
 import io.minicloud.controlplane.orchestration.DatabaseProvisionSpec
+import io.minicloud.controlplane.orchestration.KubectlUnavailableException
 import io.minicloud.controlplane.orchestration.KubernetesOrchestrator
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -105,6 +106,30 @@ class MiniCloudApiIntegrationTest {
         )
             .andExpect(status().isConflict)
             .andExpect(jsonPath("$.code").value("ALREADY_EXISTS"))
+    }
+
+    @Test
+    fun `create database should return service unavailable when kubectl is not ready`() {
+        given(
+            orchestrator.provisionDatabase(
+                DatabaseProvisionSpec(name = "pg-main", namespace = "demo"),
+            ),
+        ).willThrow(
+            KubectlUnavailableException("kubectl이 실행/연결되어 있지 않습니다. 먼저 minikube와 kubectl을 실행해 주세요."),
+        )
+
+        val request = mapOf(
+            "name" to "pg-main",
+            "namespace" to "demo",
+        )
+
+        mockMvc.perform(
+            post("/v1/databases")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)),
+        )
+            .andExpect(status().isServiceUnavailable)
+            .andExpect(jsonPath("$.code").value("KUBECTL_UNAVAILABLE"))
     }
 
     @Test
