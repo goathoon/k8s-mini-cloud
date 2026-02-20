@@ -115,3 +115,53 @@ curl -X POST http://localhost:8080/v1/apps \
     "databaseRef":"pg-main"
   }'
 ```
+
+## Web Console (모노레포 `web` 앱)
+
+React + Vite 기반 웹 콘솔이 서버에 내장되어 제공됩니다.
+
+### 사용자 접근 (npm 불필요)
+
+서버만 실행하면 됩니다.
+
+```bash
+cd server
+../gradlew bootRun
+```
+
+접속:
+
+- `http://localhost:8080/console`
+
+### 개발자용: web 앱 단독 실행
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+단독 실행 시 API URL은 아래로 조정:
+
+```bash
+cp .env.example .env
+# .env -> VITE_API_BASE_URL 수정
+```
+
+서버는 기본적으로 아래 오리진에서의 API 호출(CORS)을 허용합니다.
+
+- `http://localhost:5173`
+- `http://127.0.0.1:5173`
+- `http://localhost:5500`
+- `http://127.0.0.1:5500`
+
+필요하면 환경변수로 조정:
+
+```bash
+export MINICLOUD_WEB_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
+```
+
+참고:
+
+- Gradle이 서버 리소스 처리 시 `web`을 자동 빌드해 `/console`로 포함합니다.
+- 웹 빌드를 건너뛰려면 `MINICLOUD_SKIP_WEB_BUILD=true`를 사용할 수 있습니다.
