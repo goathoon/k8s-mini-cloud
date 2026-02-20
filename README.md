@@ -101,6 +101,14 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 21)
 ./gradlew :server:test --tests '*DatabasePodProvisionE2ETest'
 ```
 
+App + DB 연동 E2E:
+
+```bash
+export RUN_APP_DB_E2E=true
+export JAVA_HOME=$(/usr/libexec/java_home -v 21)
+./gradlew :server:test --tests '*AppWithDatabaseE2ETest'
+```
+
 ### 4) App 생성
 
 ```bash
@@ -115,6 +123,23 @@ curl -X POST http://localhost:8080/v1/apps \
     "databaseRef":"pg-main"
   }'
 ```
+
+`databaseRef`를 지정하면 App Deployment에 아래 환경변수가 자동 주입됩니다.
+
+- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`
+- `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`
+
+생성 리소스:
+
+- Deployment (`<app-name>`)
+- Service (`<app-name>-svc`)
+- Ingress (`<app-name>-ing`)
+
+Kubernetes 매니페스트 템플릿 위치:
+
+- `server/src/main/resources/k8s/templates/database.yaml`
+- `server/src/main/resources/k8s/templates/app.yaml`
+- `server/src/main/resources/k8s/templates/app-db-env.yaml`
 
 ## Web Console (모노레포 `web` 앱)
 

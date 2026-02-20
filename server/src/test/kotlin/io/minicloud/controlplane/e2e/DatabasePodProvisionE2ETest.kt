@@ -90,6 +90,12 @@ class DatabasePodProvisionE2ETest {
         val exitCode = process.waitFor()
         return CmdResult(exitCode = exitCode, stdout = stdout, stderr = stderr)
     }
+
+    private data class CmdResult(
+        val exitCode: Int,
+        val stdout: String,
+        val stderr: String,
+    )
 }
 
 private data class CreateDatabaseRequest(
@@ -102,10 +108,4 @@ private data class CreateDatabaseResponse(
     val namespace: String?,
     val status: String?,
     val secretName: String?,
-)
-
-private data class CmdResult(
-    val exitCode: Int,
-    val stdout: String,
-    val stderr: String,
 )

@@ -16,6 +16,7 @@ class HelmKubernetesOrchestrator(
     private val postgresPort: Int,
     @Value("\${minicloud.kubernetes.wait-timeout-seconds:120}")
     private val waitTimeoutSeconds: Long,
+    private val manifestTemplateRenderer: ManifestTemplateRenderer,
 ) : KubernetesOrchestrator {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -61,56 +62,18 @@ class HelmKubernetesOrchestrator(
             pipelineTo = listOf(kubectlBin, "apply", "-f", "-"),
         )
 
-        val manifest = """
-            apiVersion: v1
-            kind: Pod
-            metadata:
-              name: $podName
-              namespace: ${spec.namespace}
-              labels:
-                app.kubernetes.io/name: postgres
-                app.kubernetes.io/instance: ${spec.name}
-            spec:
-              containers:
-                - name: postgres
-                  image: $postgresImage
-                  ports:
-                    - containerPort: $postgresPort
-                  env:
-                    - name: POSTGRES_DB
-                      valueFrom:
-                        secretKeyRef:
-                          name: $secretName
-                          key: POSTGRES_DB
-                    - name: POSTGRES_USER
-                      valueFrom:
-                        secretKeyRef:
-                          name: $secretName
-                          key: POSTGRES_USER
-                    - name: POSTGRES_PASSWORD
-                      valueFrom:
-                        secretKeyRef:
-                          name: $secretName
-                          key: POSTGRES_PASSWORD
-                  readinessProbe:
-                    tcpSocket:
-                      port: $postgresPort
-                    initialDelaySeconds: 5
-                    periodSeconds: 5
-            ---
-            apiVersion: v1
-            kind: Service
-            metadata:
-              name: $serviceName
-              namespace: ${spec.namespace}
-            spec:
-              selector:
-                app.kubernetes.io/instance: ${spec.name}
-              ports:
-                - port: $postgresPort
-                  targetPort: $postgresPort
-                  protocol: TCP
-        """.trimIndent()
+        val manifest = manifestTemplateRenderer.render(
+            templatePath = "k8s/templates/database.yaml",
+            variables = mapOf(
+                "POD_NAME" to podName,
+                "NAMESPACE" to spec.namespace,
+                "INSTANCE_NAME" to spec.name,
+                "POSTGRES_IMAGE" to postgresImage,
+                "POSTGRES_PORT" to postgresPort.toString(),
+                "SECRET_NAME" to secretName,
+                "SERVICE_NAME" to serviceName,
+            ),
+        )
 
         applyYaml(manifest)
 
@@ -130,21 +93,137 @@ class HelmKubernetesOrchestrator(
     }
 
     override fun provisionApp(spec: AppProvisionSpec): AppProvisionResult {
+        validateK8sName(spec.namespace, "namespace")
+        validateK8sName(spec.name, "app name")
+        ensureKubectlReady()
+
+        val deploymentName = spec.name
+        val serviceName = "${spec.name}-svc"
+        val ingressName = "${spec.name}-ing"
+        val accessHost = "${spec.name}.${spec.namespace}.local"
+
         log.info(
-            "Provision app requested. namespace={}, name={}, image={}",
+            "Provision app requested. namespace={}, name={}, image={}, replicas={}",
             spec.namespace,
             spec.name,
             spec.image,
+            spec.replicas,
         )
-        val accessUrl = "http://${spec.name}.${spec.namespace}.local"
-        return AppProvisionResult(accessUrl = accessUrl, readyReplicas = spec.replicas)
+
+        runCommand(
+            listOf(kubectlBin, "create", "namespace", spec.namespace, "--dry-run=client", "-o", "yaml"),
+            pipelineTo = listOf(kubectlBin, "apply", "-f", "-"),
+        )
+
+        val dbEnvBlock = if (spec.databaseSecretName != null) {
+            val dbHost = "${spec.databaseSecretName.removeSuffix("-conn")}-svc"
+            val envBlock = manifestTemplateRenderer.render(
+                templatePath = "k8s/templates/app-db-env.yaml",
+                variables = mapOf(
+                    "DB_HOST" to dbHost,
+                    "DB_SECRET_NAME" to spec.databaseSecretName,
+                ),
+            )
+            "\n${envBlock.prependIndent("          ")}"
+        } else {
+            ""
+        }
+
+        val manifest = manifestTemplateRenderer.render(
+            templatePath = "k8s/templates/app.yaml",
+            variables = mapOf(
+                "DEPLOYMENT_NAME" to deploymentName,
+                "NAMESPACE" to spec.namespace,
+                "APP_NAME" to spec.name,
+                "REPLICAS" to spec.replicas.toString(),
+                "APP_IMAGE" to spec.image,
+                "APP_PORT" to spec.port.toString(),
+                "DB_ENV_BLOCK" to dbEnvBlock,
+                "SERVICE_NAME" to serviceName,
+                "INGRESS_NAME" to ingressName,
+                "ACCESS_HOST" to accessHost,
+            ),
+        )
+
+        applyYaml(manifest)
+
+        runCommand(
+            listOf(
+                kubectlBin,
+                "-n",
+                spec.namespace,
+                "rollout",
+                "status",
+                "deployment/$deploymentName",
+                "--timeout=${waitTimeoutSeconds}s",
+            ),
+        )
+
+        val readyReplicasOutput = runCommandWithOutput(
+            listOf(
+                kubectlBin,
+                "-n",
+                spec.namespace,
+                "get",
+                "deployment",
+                deploymentName,
+                "-o",
+                "jsonpath={.status.readyReplicas}",
+            ),
+        ).stdout.trim()
+
+        val readyReplicas = readyReplicasOutput.toIntOrNull() ?: 0
+        val accessUrl = "http://$accessHost"
+        return AppProvisionResult(accessUrl = accessUrl, readyReplicas = readyReplicas)
     }
 
     override fun deleteApp(spec: AppDeleteSpec) {
+        validateK8sName(spec.namespace, "namespace")
+        validateK8sName(spec.name, "app name")
+        ensureKubectlReady()
+
+        val deploymentName = spec.name
+        val serviceName = "${spec.name}-svc"
+        val ingressName = "${spec.name}-ing"
+
         log.info(
             "Delete app requested. namespace={}, name={}",
             spec.namespace,
             spec.name,
+        )
+
+        runCommand(
+            listOf(
+                kubectlBin,
+                "-n",
+                spec.namespace,
+                "delete",
+                "ingress",
+                ingressName,
+                "--ignore-not-found=true",
+            ),
+        )
+        runCommand(
+            listOf(
+                kubectlBin,
+                "-n",
+                spec.namespace,
+                "delete",
+                "service",
+                serviceName,
+                "--ignore-not-found=true",
+            ),
+        )
+        runCommand(
+            listOf(
+                kubectlBin,
+                "-n",
+                spec.namespace,
+                "delete",
+                "deployment",
+                deploymentName,
+                "--ignore-not-found=true",
+            ),
         )
     }
 
@@ -166,7 +245,34 @@ class HelmKubernetesOrchestrator(
     }
 
     private fun runCommand(command: List<String>, pipelineTo: List<String>? = null) {
-        val output = try {
+        val output = executeWithPipeline(command, pipelineTo)
+        if (output.exitCode != 0) {
+            val message = output.stderr.ifBlank { output.stdout }
+            if (looksLikeKubectlUnavailable(message)) {
+                throw KubectlUnavailableException(
+                    "kubectl이 실행/연결되어 있지 않습니다. 먼저 minikube와 kubectl을 실행해 주세요.",
+                )
+            }
+            throw IllegalStateException("Command failed (${command.joinToString(" ")}): $message")
+        }
+    }
+
+    private fun runCommandWithOutput(command: List<String>, pipelineTo: List<String>? = null): CommandOutput {
+        val output = executeWithPipeline(command, pipelineTo)
+        if (output.exitCode != 0) {
+            val message = output.stderr.ifBlank { output.stdout }
+            if (looksLikeKubectlUnavailable(message)) {
+                throw KubectlUnavailableException(
+                    "kubectl이 실행/연결되어 있지 않습니다. 먼저 minikube와 kubectl을 실행해 주세요.",
+                )
+            }
+            throw IllegalStateException("Command failed (${command.joinToString(" ")}): $message")
+        }
+        return output
+    }
+
+    private fun executeWithPipeline(command: List<String>, pipelineTo: List<String>?): CommandOutput {
+        return try {
             if (pipelineTo == null) {
                 execute(command)
             } else {
@@ -177,15 +283,6 @@ class HelmKubernetesOrchestrator(
             throw KubectlUnavailableException(
                 "kubectl이 실행/연결되어 있지 않습니다. 먼저 minikube와 kubectl을 실행해 주세요.",
             )
-        }
-        if (output.exitCode != 0) {
-            val message = output.stderr.ifBlank { output.stdout }
-            if (looksLikeKubectlUnavailable(message)) {
-                throw KubectlUnavailableException(
-                    "kubectl이 실행/연결되어 있지 않습니다. 먼저 minikube와 kubectl을 실행해 주세요.",
-                )
-            }
-            throw IllegalStateException("Command failed (${command.joinToString(" ")}): $message")
         }
     }
 

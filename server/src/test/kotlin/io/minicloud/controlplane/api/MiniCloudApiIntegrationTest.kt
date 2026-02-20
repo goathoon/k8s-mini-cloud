@@ -217,6 +217,40 @@ class MiniCloudApiIntegrationTest {
     }
 
     @Test
+    fun `create app should return service unavailable when kubectl is not ready`() {
+        given(
+            orchestrator.provisionApp(
+                AppProvisionSpec(
+                    name = "hello",
+                    namespace = "demo",
+                    image = "nginx:latest",
+                    port = 80,
+                    replicas = 1,
+                    databaseSecretName = null,
+                ),
+            ),
+        ).willThrow(
+            KubectlUnavailableException("kubectl이 실행/연결되어 있지 않습니다. 먼저 minikube와 kubectl을 실행해 주세요."),
+        )
+
+        val appRequest = mapOf(
+            "name" to "hello",
+            "namespace" to "demo",
+            "image" to "nginx:latest",
+            "port" to 80,
+            "replicas" to 1,
+        )
+
+        mockMvc.perform(
+            post("/v1/apps")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(appRequest)),
+        )
+            .andExpect(status().isServiceUnavailable)
+            .andExpect(jsonPath("$.code").value("KUBECTL_UNAVAILABLE"))
+    }
+
+    @Test
     fun `create app with invalid port should return validation error`() {
         val appRequest = mapOf(
             "name" to "hello",

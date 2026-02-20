@@ -1,0 +1,26 @@
+env:
+  - name: DB_HOST
+    value: "{{DB_HOST}}"
+  - name: DB_PORT
+    value: "5432"
+  - name: DB_NAME
+    valueFrom:
+      secretKeyRef:
+        name: {{DB_SECRET_NAME}}
+        key: POSTGRES_DB
+  - name: DB_USER
+    valueFrom:
+      secretKeyRef:
+        name: {{DB_SECRET_NAME}}
+        key: POSTGRES_USER
+  - name: DB_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: {{DB_SECRET_NAME}}
+        key: POSTGRES_PASSWORD
+  - name: SPRING_DATASOURCE_URL
+    value: "jdbc:postgresql://$$(DB_HOST):$$(DB_PORT)/$$(DB_NAME)"
+  - name: SPRING_DATASOURCE_USERNAME
+    value: "$$(DB_USER)"
+  - name: SPRING_DATASOURCE_PASSWORD
+    value: "$$(DB_PASSWORD)"

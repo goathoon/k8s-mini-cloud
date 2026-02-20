@@ -7,6 +7,7 @@ import io.minicloud.controlplane.domain.DatabaseInstanceRepository
 import io.minicloud.controlplane.domain.ProvisioningStatus
 import io.minicloud.controlplane.orchestration.AppDeleteSpec
 import io.minicloud.controlplane.orchestration.AppProvisionSpec
+import io.minicloud.controlplane.orchestration.KubectlUnavailableException
 import io.minicloud.controlplane.orchestration.KubernetesOrchestrator
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -17,15 +18,15 @@ class AppService(
     private val databaseRepository: DatabaseInstanceRepository,
     private val orchestrator: KubernetesOrchestrator,
 ) {
-    @Transactional
+    @Transactional(noRollbackFor = [KubectlUnavailableException::class])
     fun create(request: CreateAppRequest): AppInstance {
-        val duplicate = appRepository.findByNamespaceAndName(request.namespace, request.name).isPresent
+        val duplicate = appRepository.existsByNamespaceAndName(request.namespace, request.name)
         if (duplicate) {
             throw ResourceAlreadyExistsException("App ${request.namespace}/${request.name} already exists")
         }
 
         val databaseSecretName = request.databaseRef?.let { dbName ->
-            val db = databaseRepository.findByNamespaceAndName(request.namespace, dbName)
+            val db = databaseRepository.findTopByNamespaceAndNameOrderByCreatedAtDesc(request.namespace, dbName)
                 .orElseThrow {
                     ResourceNotFoundException("Database ${request.namespace}/$dbName not found")
                 }
@@ -62,6 +63,11 @@ class AppService(
             app.readyReplicas = result.readyReplicas
             app.status = ProvisioningStatus.READY
             appRepository.save(app)
+        } catch (ex: KubectlUnavailableException) {
+            app.status = ProvisioningStatus.FAILED
+            app.message = ex.message
+            appRepository.save(app)
+            throw ex
         } catch (ex: Exception) {
             app.status = ProvisioningStatus.FAILED
             app.message = ex.message
@@ -71,13 +77,13 @@ class AppService(
 
     @Transactional(readOnly = true)
     fun get(namespace: String, name: String): AppInstance {
-        return appRepository.findByNamespaceAndName(namespace, name)
+        return appRepository.findTopByNamespaceAndNameOrderByCreatedAtDesc(namespace, name)
             .orElseThrow { ResourceNotFoundException("App $namespace/$name not found") }
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = [KubectlUnavailableException::class])
     fun delete(namespace: String, name: String): AppInstance {
-        val app = appRepository.findByNamespaceAndName(namespace, name)
+        val app = appRepository.findTopByNamespaceAndNameOrderByCreatedAtDesc(namespace, name)
             .orElseThrow { ResourceNotFoundException("App $namespace/$name not found") }
 
         app.status = ProvisioningStatus.DELETING
@@ -92,6 +98,11 @@ class AppService(
             )
             app.status = ProvisioningStatus.DELETED
             appRepository.save(app)
+        } catch (ex: KubectlUnavailableException) {
+            app.status = ProvisioningStatus.FAILED
+            app.message = ex.message
+            appRepository.save(app)
+            throw ex
         } catch (ex: Exception) {
             app.status = ProvisioningStatus.FAILED
             app.message = ex.message
@@ -99,4 +110,3 @@ class AppService(
         }
     }
 }
-

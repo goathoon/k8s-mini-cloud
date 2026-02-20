@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{DEPLOYMENT_NAME}}
+  namespace: {{NAMESPACE}}
+  labels:
+    app.kubernetes.io/name: {{APP_NAME}}
+    app.kubernetes.io/instance: {{APP_NAME}}
+spec:
+  replicas: {{REPLICAS}}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{APP_NAME}}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{APP_NAME}}
+    spec:
+      containers:
+        - name: app
+          image: {{APP_IMAGE}}
+          ports:
+            - containerPort: {{APP_PORT}}
+{{DB_ENV_BLOCK}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{SERVICE_NAME}}
+  namespace: {{NAMESPACE}}
+spec:
+  selector:
+    app.kubernetes.io/instance: {{APP_NAME}}
+  ports:
+    - name: http
+      port: {{APP_PORT}}
+      targetPort: {{APP_PORT}}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{INGRESS_NAME}}
+  namespace: {{NAMESPACE}}
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: {{ACCESS_HOST}}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{SERVICE_NAME}}
+                port:
+                  number: {{APP_PORT}}
