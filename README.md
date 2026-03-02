@@ -47,6 +47,8 @@ docker compose down
 
 ### 2) 서버 실행
 
+주의: 이 프로젝트는 `Java 21` 환경에서 실행해야 합니다. (`Java 25` 등에서는 Gradle/Kotlin 스크립트 단계에서 실행이 실패할 수 있습니다.)
+
 ```bash
 cd server
 ../gradlew bootRun
